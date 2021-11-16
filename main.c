@@ -26,14 +26,37 @@
 #define MODE_FASTERB 5
 
 
-double fast_exp(double x) {
+static inline double reinterpret_long_as_double(long int x) {
+    // type pun: reinterpret the bits of x as a 64 bit float.
+    // this is expected to compile to a no-op.
+    // with C++ we'd use "reinterpret cast".
     union {
         long int i;
         double d;
     } b;
-    b.i = (long int)(fma(APPROX_A, x, + (APPROX_B - APPROX_C)));
+    b.i = x;
+    return b.d;
+}
+
+
+static inline long int reinterpret_double_as_long(double x) {
+    // type pun: reinterpret the bits of x as a 64 bit int.
+    // this is expected to compile to a no-op.
+    // with C++ we'd use "reinterpret cast".
+    union {
+        long int i;
+        double d;
+    } b;
+    b.d = x;
+    return b.i;
+}
+
+
+double fast_exp(double x) {
+    double z;
+    z = reinterpret_long_as_double((long int)(fma(APPROX_A, x, + (APPROX_B - APPROX_C))));
     // above approximation gives bad results where x < -706.0
-    return (x >= FAST_EXP_MIN_ARG) ? b.d : 0.0;
+    return (x >= FAST_EXP_MIN_ARG) ? z : 0.0;
 }
 
 
@@ -43,13 +66,10 @@ double fast_log(double x) {
     // naively invert fast_exp
     // y = (a * x) + b
     // x = (y - b) / a
+    // x = (1/a) * y + (1/a) * (-b)  // distribute multiply for fma
     double z;
-    union {
-        long int i;
-        double d;
-    } b;
-    b.d = x;
-    z = APPROX_A_INV * ((double)b.i - (APPROX_B - APPROX_C));
+    z = (double)reinterpret_double_as_long(x);
+    z = fma(APPROX_A_INV, z, APPROX_A_INV * (- APPROX_B + APPROX_C));
     return (x > 0.0) ? z : -INFINITY;
 }
 
