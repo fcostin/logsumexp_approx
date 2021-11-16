@@ -14,12 +14,15 @@
 #define APPROX_A (APPROX_S / APPROX_LN2)
 #define APPROX_B (APPROX_S * 1023l)
 #define APPROX_C (60801l * (1l << APPROX_S0))
+#define APPROX_A_INV (1.0 / APPROX_A)
 
+#define FAST_EXP_MIN_ARG -706.0
 
 
 #define MODE_BASE 1
 #define MODE_FAST 2
 #define MODE_ONLY_SUM 3
+#define MODE_FASTER 4
 
 
 double fast_exp(double x) {
@@ -28,7 +31,25 @@ double fast_exp(double x) {
         double d;
     } b;
     b.i = (long int)(fma(APPROX_A, x, + (APPROX_B - APPROX_C)));
-    return b.d;
+    // above approximation gives bad results where x < -706.0
+    return (x >= FAST_EXP_MIN_ARG) ? b.d : 0.0;
+}
+
+
+double fast_log(double x) {
+    // precondition: x >= 0.0
+    //
+    // naively invert fast_exp
+    // y = (a * x) + b
+    // x = (y - b) / a
+    double z;
+    union {
+        long int i;
+        double d;
+    } b;
+    b.d = x;
+    z = APPROX_A_INV * ((double)b.i - (APPROX_B - APPROX_C));
+    return (x > 0.0) ? z : -INFINITY;
 }
 
 
@@ -81,7 +102,28 @@ double fast_log_sum_exp(double *a, int n) {
     for (i = 0; i < n; ++i) {
         acc += fast_exp(a[i] - a_max);
     }
-    return log(acc) + a_max; // todo fast_log
+    return log(acc) + a_max;
+}
+
+
+double faster_log_sum_exp(double *a, int n) {
+    // preconditions:
+    // -inf <= a[i] <= 0.0 for all i = 0, ..., n-1
+    double a_max, acc;
+    int i;
+    a_max = -INFINITY;
+    for (i = 0; i < n; ++i) {
+        a_max = fmax(a[i], a_max);
+    }
+    if (a_max <= -INFINITY || n <= 1) {
+        return a_max;
+    }
+    // TODO: consider trick of biasing a_max to push more information into ieee exponent bits
+    acc = 0.0;
+    for (i = 0; i < n; ++i) {
+        acc += fast_exp(a[i] - a_max);
+    }
+    return fast_log(acc) + a_max;
 }
 
 
@@ -138,8 +180,11 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[1], "onlysum") == 0) {
             printf("set mode=onlysum\n");
             mode = MODE_ONLY_SUM;
+        } else if (strcmp(argv[1], "faster") == 0) {
+            printf("set mode=faster\n");
+            mode = MODE_FASTER;
         } else {
-            printf("unrecognised mode, expected one of 'base', 'fast', 'onlysum'\n");
+            printf("unrecognised mode, expected one of 'base', 'fast', 'faster', 'onlysum'\n");
             exit(1);
         }
     }
@@ -180,6 +225,12 @@ int main(int argc, char **argv) {
         for (j = 0; j < trials; ++j) {
             for (i = 0; i < n; ++i) {
                 acc += sum(&(logps[start[i]]), end[i] - start[i]);
+            }
+        }
+    } else if (mode == MODE_FASTER) {
+        for (j = 0; j < trials; ++j) {
+            for (i = 0; i < n; ++i) {
+                acc += faster_log_sum_exp(&(logps[start[i]]), end[i] - start[i]);
             }
         }
     }
