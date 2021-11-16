@@ -23,6 +23,7 @@
 #define MODE_FAST 2
 #define MODE_ONLY_SUM 3
 #define MODE_FASTER 4
+#define MODE_FASTERB 5
 
 
 double fast_exp(double x) {
@@ -127,6 +128,35 @@ double faster_log_sum_exp(double *a, int n) {
 }
 
 
+double fasterb_log_sum_exp(double *a, int n) {
+    // preconditions:
+    // -inf <= a[i] <= 0.0 for all i = 0, ..., n-1
+    double a_max, acc, acc_0, acc_1;
+    int i, m;
+    a_max = -INFINITY;
+    for (i = 0; i < n; ++i) {
+        a_max = fmax(a[i], a_max);
+    }
+    if (a_max <= -INFINITY || n <= 1) {
+        return a_max;
+    }
+    m = n - (n % 2);
+    acc_0 = 0.0;
+    acc_1 = 0.0;
+    for (i = 0; i < m; i += 2) {
+        acc_0 += fast_exp(a[i] - a_max);
+        acc_1 += fast_exp(a[i+1] - a_max);
+    }
+    acc = acc_0 + acc_1;
+    if (m != n) {
+        acc += fast_exp(a[n-1] - a_max);
+    }
+    return fast_log(acc) + a_max;
+}
+
+
+
+
 void sample_uniform(double *a, int n, double min, double max) {
     int i;
     double range = (max - min); 
@@ -183,8 +213,11 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[1], "faster") == 0) {
             printf("set mode=faster\n");
             mode = MODE_FASTER;
+        } else if (strcmp(argv[1], "fasterb") == 0) {
+            printf("set mode=fasterb\n");
+            mode = MODE_FASTERB;
         } else {
-            printf("unrecognised mode, expected one of 'base', 'fast', 'faster', 'onlysum'\n");
+            printf("unrecognised mode, expected one of 'base', 'fast', 'faster', 'fasterb', 'onlysum'\n");
             exit(1);
         }
     }
@@ -231,6 +264,12 @@ int main(int argc, char **argv) {
         for (j = 0; j < trials; ++j) {
             for (i = 0; i < n; ++i) {
                 acc += faster_log_sum_exp(&(logps[start[i]]), end[i] - start[i]);
+            }
+        }
+    } else if (mode == MODE_FASTERB) {
+        for (j = 0; j < trials; ++j) {
+            for (i = 0; i < n; ++i) {
+                acc += fasterb_log_sum_exp(&(logps[start[i]]), end[i] - start[i]);
             }
         }
     }
