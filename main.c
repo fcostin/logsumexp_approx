@@ -175,8 +175,6 @@ double fasterb_log_sum_exp(double *a, int n) {
 }
 
 
-
-
 void sample_uniform(double *a, int n, double min, double max) {
     int i;
     double range = (max - min); 
@@ -187,17 +185,39 @@ void sample_uniform(double *a, int n, double min, double max) {
     }
 }
 
+typedef struct {
+    int offset;
+    int width;
+} range_t;
 
-void sample_ranges(int *start, int *end, int n, int w, int m) {
+
+void sample_ranges(range_t *ranges, int n, int w, int m) {
     int i, width, offset;
     for (i=0; i<n; ++i) {
         // sample width from 1 to w
         width = rand() % (w + 1 - 1) + 1;
         // sample offset from 0 to m-width
         offset = rand() % (m-width + 1);
-        start[i] = offset;
-        end[i] = offset + width;
+        ranges[i].offset = offset;
+        ranges[i].width = width;
     }
+}
+
+
+
+int compare_ranges(const void *a, const void *b) {
+    range_t *aa, *bb;
+    aa = (range_t*)a;
+    bb = (range_t*)b;
+    int delta_w, delta_o;
+    delta_w = (aa->width - bb->width);
+    delta_o = (aa->offset - bb->offset);
+    // return (delta_o != 0) ? delta_o : delta_w; // bad order
+    return (delta_w != 0) ? delta_w : delta_o; // good order
+}
+
+void sort_ranges_inplace(range_t *ranges, int n) {
+    qsort((void *)ranges, n, sizeof(range_t), compare_ranges);
 }
 
 
@@ -213,7 +233,8 @@ int main(int argc, char **argv) {
     unsigned int seed;
     int n, m, w, i, trials, j;
     double *logps;
-    int *start, *end;
+
+    range_t *ranges;
     double acc;
 
     int mode=-1;
@@ -254,9 +275,21 @@ int main(int argc, char **argv) {
 
     n = 5000;
     w = 10;
-    start = malloc(n * sizeof(int));
-    end = malloc(n * sizeof(int));
-    sample_ranges(start, end, n, w, m);
+    ranges = malloc(n * sizeof(range_t));
+    sample_ranges(ranges, n, w, m);
+
+    // for (i = 0; i < n; ++i) {
+    //     printf("log_sum_exp,%d,%d\n", ranges[i].offset, ranges[i].width);
+    // }
+    // return 0;
+
+    //  ranges              "faster"            branch
+    //                      running time (s)    misses (%)
+    //  ------              ----------------    -------
+    //  unsorted            0.760               7.59
+    //  sorted by offset    0.734               6.74
+    //  sorted by width     0.534               0.02
+    sort_ranges_inplace(ranges, n);
 
     trials = 10000;
 
@@ -265,34 +298,35 @@ int main(int argc, char **argv) {
     if (mode == MODE_BASE) {
         for (j = 0; j < trials; ++j) {
             for (i = 0; i < n; ++i) {
-                acc += log_sum_exp(&(logps[start[i]]), end[i] - start[i]);
+                acc += log_sum_exp(&(logps[ranges[i].offset]), ranges[i].width);
             }
         }
     } else if (mode == MODE_FAST) {
         for (j = 0; j < trials; ++j) {
             for (i = 0; i < n; ++i) {
-                acc += fast_log_sum_exp(&(logps[start[i]]), end[i] - start[i]);
+                acc += fast_log_sum_exp(&(logps[ranges[i].offset]), ranges[i].width);
             }
         }
     } else if (mode == MODE_ONLY_SUM) {
         for (j = 0; j < trials; ++j) {
             for (i = 0; i < n; ++i) {
-                acc += sum(&(logps[start[i]]), end[i] - start[i]);
+                acc += sum(&(logps[ranges[i].offset]), ranges[i].width);
             }
         }
     } else if (mode == MODE_FASTER) {
         for (j = 0; j < trials; ++j) {
             for (i = 0; i < n; ++i) {
-                acc += faster_log_sum_exp(&(logps[start[i]]), end[i] - start[i]);
+                acc += faster_log_sum_exp(&(logps[ranges[i].offset]), ranges[i].width);
             }
         }
     } else if (mode == MODE_FASTERB) {
         for (j = 0; j < trials; ++j) {
             for (i = 0; i < n; ++i) {
-                acc += fasterb_log_sum_exp(&(logps[start[i]]), end[i] - start[i]);
+                acc += faster_log_sum_exp(&(logps[ranges[i].offset]), ranges[i].width);
             }
         }
     }
+
 
     printf("done\n");
 
