@@ -23,7 +23,14 @@
 #define MODE_FAST 2
 #define MODE_ONLY_SUM 3
 #define MODE_FASTER 4
-#define MODE_FASTERB 5
+#define MODE_FASTERBB 6
+
+
+typedef struct {
+    int offset;
+    int width;
+} range_t;
+
 
 
 static inline double reinterpret_long_as_double(long int x) {
@@ -148,30 +155,199 @@ double faster_log_sum_exp(double *a, int n) {
 }
 
 
-double fasterb_log_sum_exp(double *a, int n) {
-    // preconditions:
-    // -inf <= a[i] <= 0.0 for all i = 0, ..., n-1
-    double a_max, acc, acc_0, acc_1;
-    int i, m;
-    a_max = -INFINITY;
-    for (i = 0; i < n; ++i) {
-        a_max = fmax(a[i], a_max);
-    }
-    if (a_max <= -INFINITY || n <= 1) {
+static inline double faster_log_sum_exp_1(const double *a) {
+    return a[0];
+}
+
+static inline double faster_log_sum_exp_2(const double *a) {
+    double a_max;
+    a_max = fmax(a[0], a[1]);
+    if (a_max <= -INFINITY) {
         return a_max;
     }
-    m = n - (n % 2);
-    acc_0 = 0.0;
-    acc_1 = 0.0;
-    for (i = 0; i < m; i += 2) {
-        acc_0 += fast_exp(a[i] - a_max);
-        acc_1 += fast_exp(a[i+1] - a_max);
+    return fast_log(
+        fast_exp(a[0] - a_max) +
+        fast_exp(a[1] - a_max)
+    ) + a_max;
+}
+
+static inline double faster_log_sum_exp_3(const double *a) {
+    double a_max;
+    a_max = fmax(fmax(a[0], a[1]), a[2]);
+    if (a_max <= -INFINITY) {
+        return a_max;
     }
-    acc = acc_0 + acc_1;
-    if (m != n) {
-        acc += fast_exp(a[n-1] - a_max);
+    return fast_log(
+        fast_exp(a[0] - a_max) +
+        fast_exp(a[1] - a_max) +
+        fast_exp(a[2] - a_max)
+    ) + a_max;
+}
+
+static inline double faster_log_sum_exp_4(const double *a) {
+    double a_max;
+    a_max = fmax(fmax(a[0], a[1]), fmax(a[2], a[3]));
+    if (a_max <= -INFINITY) {
+        return a_max;
     }
-    return fast_log(acc) + a_max;
+    return fast_log(
+        fast_exp(a[0] - a_max) +
+        fast_exp(a[1] - a_max) +
+        fast_exp(a[2] - a_max) +
+        fast_exp(a[3] - a_max)
+    ) + a_max;
+}
+
+static inline double faster_log_sum_exp_5(const double *a) {
+    double a_max;
+    a_max = fmax(fmax(fmax(a[0], a[1]), fmax(a[2], a[3])), a[4]);
+    if (a_max <= -INFINITY) {
+        return a_max;
+    }
+    return fast_log(
+        fast_exp(a[0] - a_max) +
+        fast_exp(a[1] - a_max) +
+        fast_exp(a[2] - a_max) +
+        fast_exp(a[3] - a_max) +
+        fast_exp(a[4] - a_max)
+    ) + a_max;
+}
+
+static inline double faster_log_sum_exp_6(const double *a) {
+    double a_max;
+    a_max = fmax(fmax(fmax(a[0], a[1]), fmax(a[2], a[3])), fmax(a[4], a[5]));
+    if (a_max <= -INFINITY) {
+        return a_max;
+    }
+    return fast_log(
+        fast_exp(a[0] - a_max) +
+        fast_exp(a[1] - a_max) +
+        fast_exp(a[2] - a_max) +
+        fast_exp(a[3] - a_max) +
+        fast_exp(a[4] - a_max) +
+        fast_exp(a[5] - a_max)
+    ) + a_max;
+}
+
+static inline double faster_log_sum_exp_7(const double *a) {
+    double a_max;
+    a_max = fmax(fmax(fmax(a[0], a[1]), fmax(a[2], a[3])), fmax(fmax(a[4], a[5]), a[6]));
+    if (a_max <= -INFINITY) {
+        return a_max;
+    }
+    return fast_log(
+        fast_exp(a[0] - a_max) +
+        fast_exp(a[1] - a_max) +
+        fast_exp(a[2] - a_max) +
+        fast_exp(a[3] - a_max) +
+        fast_exp(a[4] - a_max) +
+        fast_exp(a[5] - a_max) +
+        fast_exp(a[6] - a_max)
+    ) + a_max;
+}
+
+static inline double faster_log_sum_exp_8(const double *a) {
+    double a_max;
+    a_max = fmax(fmax(fmax(a[0], a[1]), fmax(a[2], a[3])), fmax(fmax(a[4], a[5]), fmax(a[6], a[7])));
+    if (a_max <= -INFINITY) {
+        return a_max;
+    }
+    return fast_log(
+        fast_exp(a[0] - a_max) +
+        fast_exp(a[1] - a_max) +
+        fast_exp(a[2] - a_max) +
+        fast_exp(a[3] - a_max) +
+        fast_exp(a[4] - a_max) +
+        fast_exp(a[5] - a_max) +
+        fast_exp(a[6] - a_max) +
+        fast_exp(a[7] - a_max)
+    ) + a_max;
+}
+
+static inline double faster_log_sum_exp_9(const double *a) {
+    double a_max;
+    a_max = fmax(fmax(fmax(fmax(a[0], a[1]), fmax(a[2], a[3])), fmax(fmax(a[4], a[5]), fmax(a[6], a[7]))), a[8]);
+    if (a_max <= -INFINITY) {
+        return a_max;
+    }
+    return fast_log(
+        fast_exp(a[0] - a_max) +
+        fast_exp(a[1] - a_max) +
+        fast_exp(a[2] - a_max) +
+        fast_exp(a[3] - a_max) +
+        fast_exp(a[4] - a_max) +
+        fast_exp(a[5] - a_max) +
+        fast_exp(a[6] - a_max) +
+        fast_exp(a[7] - a_max) +
+        fast_exp(a[8] - a_max)
+    ) + a_max;
+}
+
+static inline double faster_log_sum_exp_10(const double *a) {
+    double a_max;
+    a_max = fmax(fmax(fmax(fmax(a[0], a[1]), fmax(a[2], a[3])), fmax(fmax(a[4], a[5]), fmax(a[6], a[7]))), fmax(a[8], a[9]));
+    if (a_max <= -INFINITY) {
+        return a_max;
+    }
+    return fast_log(
+        fast_exp(a[0] - a_max) +
+        fast_exp(a[1] - a_max) +
+        fast_exp(a[2] - a_max) +
+        fast_exp(a[3] - a_max) +
+        fast_exp(a[4] - a_max) +
+        fast_exp(a[5] - a_max) +
+        fast_exp(a[6] - a_max) +
+        fast_exp(a[7] - a_max) +
+        fast_exp(a[8] - a_max) +
+        fast_exp(a[9] - a_max)
+    ) + a_max;
+}
+
+
+double faster_log_sum_exp_bb(range_t *ranges, double *logps, int n) {
+    // this version only supports ranges of with 1 -- 10.
+    // pre-req: input ranges ordered with nondecreasing width
+
+    // method       running time (s)
+    // ------
+    // faster       0.532
+    // fasterbb     0.421
+
+    double acc = 0.0;
+
+    int i = 0.0;
+
+    for(; i < n && ranges[i].width == 1; ++i) {
+        acc += faster_log_sum_exp_1(&(logps[ranges[i].offset]));
+    }
+    for(; i < n && ranges[i].width == 2; ++i) {
+        acc += faster_log_sum_exp_2(&(logps[ranges[i].offset]));
+    }
+    for(; i < n && ranges[i].width == 3; ++i) {
+        acc += faster_log_sum_exp_3(&(logps[ranges[i].offset]));
+    }
+    for(; i < n && ranges[i].width == 4; ++i) {
+        acc += faster_log_sum_exp_4(&(logps[ranges[i].offset]));
+    }
+    for(; i < n && ranges[i].width == 5; ++i) {
+        acc += faster_log_sum_exp_5(&(logps[ranges[i].offset]));
+    }
+    for(; i < n && ranges[i].width == 6; ++i) {
+        acc += faster_log_sum_exp_6(&(logps[ranges[i].offset]));
+    }
+    for(; i < n && ranges[i].width == 7; ++i) {
+        acc += faster_log_sum_exp_7(&(logps[ranges[i].offset]));
+    }
+    for(; i < n && ranges[i].width == 8; ++i) {
+        acc += faster_log_sum_exp_8(&(logps[ranges[i].offset]));
+    }
+    for(; i < n && ranges[i].width == 9; ++i) {
+        acc += faster_log_sum_exp_9(&(logps[ranges[i].offset]));
+    }
+    for(; i < n && ranges[i].width == 10; ++i) {
+        acc += faster_log_sum_exp_10(&(logps[ranges[i].offset]));
+    }
+    return acc;
 }
 
 
@@ -184,11 +360,6 @@ void sample_uniform(double *a, int n, double min, double max) {
         a[i] = min + (rand() / div);
     }
 }
-
-typedef struct {
-    int offset;
-    int width;
-} range_t;
 
 
 void sample_ranges(range_t *ranges, int n, int w, int m) {
@@ -254,11 +425,11 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[1], "faster") == 0) {
             printf("set mode=faster\n");
             mode = MODE_FASTER;
-        } else if (strcmp(argv[1], "fasterb") == 0) {
-            printf("set mode=fasterb\n");
-            mode = MODE_FASTERB;
+        } else if (strcmp(argv[1], "fasterbb") == 0) {
+            printf("set mode=fasterbb\n");
+            mode = MODE_FASTERBB;
         } else {
-            printf("unrecognised mode, expected one of 'base', 'fast', 'faster', 'fasterb', 'onlysum'\n");
+            printf("unrecognised mode, expected one of 'base', 'fast', 'faster', 'fasterbb', 'onlysum'\n");
             exit(1);
         }
     }
@@ -319,13 +490,15 @@ int main(int argc, char **argv) {
                 acc += faster_log_sum_exp(&(logps[ranges[i].offset]), ranges[i].width);
             }
         }
-    } else if (mode == MODE_FASTERB) {
+    } else if (mode == MODE_FASTERBB) {
         for (j = 0; j < trials; ++j) {
-            for (i = 0; i < n; ++i) {
-                acc += faster_log_sum_exp(&(logps[ranges[i].offset]), ranges[i].width);
-            }
-        }
+            logps[0] += acc; // impede optimisation
+            acc += faster_log_sum_exp_bb(ranges, logps, n);
+            logps[0] -= acc; // impede optimisation
+       }
     }
+
+
 
 
     printf("done\n");
