@@ -17,3 +17,31 @@ can run it in a docker container
 
 the resulting binary may be executed outside the container and profiled with `perf`.
 
+
+results
+-------
+
+```
+				running
+branch		mode		time (s)
+============	=============	=====		=================================================
+
+master		base    	2.851   	log-sum-exp. glibc math.h exp and log
+
+master		fast    	1.022   	replace exp with cheap approximation
+
+master		faster  	0.750   	replace log with cheap approximation
+
+sort-blocks     faster  	0.533   	sort blocks by width. reduces branch
+						mispredictions from 7.59% to 0.02%
+
+specialise-	fasterbb	0.421		specialise code to handle each fixed
+block-length					block width from 1 to 10.
+
+compile-blocks  gen     	0.350   	code generate a single function taking
+						all block offsets and widths as known
+						as compile time. note: around 20% of
+						blocks are duplicated in input, clang
+						finds all of these and factors them out.
+						Compilation takes about 5 minutes.
+```
