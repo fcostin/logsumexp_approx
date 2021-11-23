@@ -504,12 +504,13 @@ int main(int argc, char **argv) {
             logps[0] -= acc; // impede optimisation
        }
     } else if (mode == MODE_JIT) {
-
+        printf("jit: generating code\n");
         err = make_batch_log_sum_exp_jit_reduction_func(ranges, n, &jf);
         if (err != 0) {
             perror("err: make_batch_log_sum_exp_jit_reduction_func");
             return err;
         }
+        printf("jit: making code RX\n");
         err = arm_jit_reduction_func(&jf);
         if (err != 0) {
             perror("err: arm_jit_reduction_func");
@@ -519,6 +520,7 @@ int main(int argc, char **argv) {
             }
             return err;
         }
+        printf("jit: ready\n");
 
         for (j = 0; j < trials; ++j) {
             acc += jf.f(logps, ranges, n);
