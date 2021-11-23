@@ -1,6 +1,6 @@
 """
 generate gnu assembler code to compare an array
-of 1 to 10 doubles.
+of 0 to 10 doubles.
 
 generates code using scalar max ops
 

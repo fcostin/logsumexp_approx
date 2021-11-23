@@ -510,7 +510,8 @@ int main(int argc, char **argv) {
             perror("err: make_batch_log_sum_exp_jit_reduction_func");
             return err;
         }
-        printf("jit: making code RX\n");
+        printf("jit: generated %zu bytes of code\n", jf.size);
+        printf("jit: switching mode RW -> RX\n");
         err = arm_jit_reduction_func(&jf);
         if (err != 0) {
             perror("err: arm_jit_reduction_func");

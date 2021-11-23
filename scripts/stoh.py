@@ -5,11 +5,14 @@ stoh -- aka .s to .h
 purpose:
 
 Assemble the given gnu assembler file, assumed to contain
-code for a single function in the .text section, and write
-the resulting bytes of machine code to the given output
-header file that could be imported from a C program
+blocks of code in various named sections, and write the
+bytes of machine code for each section as an array literal
+to the given output header file.
 
-python3 as.py --in-file demo.s --out-file foo
+The resulting file can hopefully be imported into a C
+program.
+
+python3 as.py --in-file demo.s --out-file foo.h
 """
 
 import argparse
