@@ -7,7 +7,13 @@
 #include <math.h>
 
 
-typedef double (*reduction_func_t)(double *);
+typedef struct {
+    int offset;
+    int width;
+} range_t;
+
+
+typedef double (*reduction_func_t)(double *, range_t *, int);
 
 
 typedef struct {
@@ -15,6 +21,7 @@ typedef struct {
     void *m;
     size_t size;
 } jit_reduction_func_t;
+
 
 
 double baseline_log_sum_exp(double *a, int n) {
@@ -29,6 +36,17 @@ double baseline_log_sum_exp(double *a, int n) {
         acc += exp(a[i] - acc_max);
     }
     return log(acc) + acc_max;
+}
+
+
+double baseline_batch_log_sum_exp(double *a, range_t *ranges, int n_ranges) {
+    double result = 0.0;
+    int i, offset;
+    for (i = 0; i < n_ranges; ++i) {
+        offset = ranges[i].offset;
+        result += baseline_log_sum_exp(&a[offset], ranges[i].width);
+    }
+    return result;
 }
 
 
@@ -250,9 +268,7 @@ const unsigned char CODE_FAST_LOG[] = {
 };
 
 
-
 const unsigned char CODE_LOG_SUM_EXP_FOOTER[] = {
-    0xc5, 0xf9, 0x28, 0xc2, // vmovapd %xmm2,%xmm0  # result += acc
     0xc3 // retq
 };
 
@@ -278,6 +294,7 @@ int make_log_sum_exp_jit_reduction_func(int n, jit_reduction_func_t *jf) {
     //
     int total_size = 0, iota, i, status;
     unsigned char *code = NULL;
+
     total_size += sizeof(CODE_LOG_SUM_EXP_HEADER);
     total_size += sizeof(CODE_FMAX_HEADER);
     for (i = 0; i < 10; ++i) {
@@ -331,10 +348,120 @@ int make_log_sum_exp_jit_reduction_func(int n, jit_reduction_func_t *jf) {
 }
 
 
+void encode_literal_int64(unsigned char *code, long x) {
+    unsigned char b;
+    int i;
+    for (i = 0; i<8; ++i) {
+        b = 0xff & x;
+        code[i] = b;
+        x >>= 8;
+    }
+    return;
+}
+
+
+int make_batch_log_sum_exp_jit_reduction_func(range_t *ranges, int n_ranges, jit_reduction_func_t *jf) {
+    // batched variant of make_log_sum_exp_jit_reduction_func
+    // x86-64 system V ABI
+    // first three integer/pointer parameters are passed as rdi, rsi, rdx
+    // rdi : pointer to data (array of doubles)
+    // rsi : pointer to ranges (array of range_t). ignored at runtime. we use given ranges at jit-time
+    // rdx : number of ranges. ignored at runtime. we use n_ranges at jit-time.
+  
+    int total_size = 0, iota, i, n, range_i, offset, prev_offset, delta_offset, status;
+    unsigned char *code = NULL;
+
+    unsigned char code_shift_rdi[13] = {
+        0x48, 0xb9, // movabs $<64bit-int-literal>,%rcx
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // <64bit-int-literal>
+        0x48, 0x01, 0xcf // add %rcx,%rdi
+    };
+
+    total_size += sizeof(CODE_LOG_SUM_EXP_HEADER);
+
+    for (range_i = 0; range_i < n_ranges; ++range_i) {
+        offset = ranges[range_i].offset;
+        n = ranges[range_i].width;
+
+        // move rdi by delta_offset * sizeof(double)
+        total_size += sizeof(code_shift_rdi);
+
+        total_size += sizeof(CODE_FMAX_HEADER);
+        for (i = 0; i < 10; ++i) {
+            if (n >= i+1) {
+                total_size += CODESIZE_LOAD_A_XMM3[i] + sizeof(CODE_MAX_XMM3_XMM1_XMM1);
+            }
+        }
+        total_size += sizeof(CODE_ACC_FAST_EXP_HEADER);
+        for (i = 0; i < 10; ++i) {
+            if (n >= i+1) {
+                total_size += CODESIZE_LOAD_A_XMM3[i] + sizeof(CODE_ACC_FAST_EXP_CYCLE);
+            }
+        }
+        total_size += sizeof(CODE_FAST_LOG);
+    }
+
+    total_size += sizeof(CODE_LOG_SUM_EXP_FOOTER);
+
+    status = allocate_jit_reduction_func(total_size * sizeof(unsigned char), jf);
+    if (status != 0) {
+        return status;
+    }
+    code = (unsigned char*)jf->m;
+
+    iota = 0;
+
+    memcpy(code + iota, CODE_LOG_SUM_EXP_HEADER, sizeof(CODE_LOG_SUM_EXP_HEADER)); iota += sizeof(CODE_LOG_SUM_EXP_HEADER);
+
+    prev_offset = 0;
+
+    for (range_i = 0; range_i < n_ranges; ++range_i) {
+        offset = ranges[range_i].offset;
+        n = ranges[range_i].width;
+
+        // move rdi by delta_offset * sizeof(double)
+        delta_offset = offset - prev_offset;
+        prev_offset = offset;
+
+        encode_literal_int64(code_shift_rdi + 2, (long)(sizeof(double) * delta_offset)); // overwrite int64 literal with delta_offset
+        memcpy(code + iota, code_shift_rdi, sizeof(code_shift_rdi)); iota += sizeof(code_shift_rdi);
+
+        memcpy(code + iota, CODE_FMAX_HEADER, sizeof(CODE_FMAX_HEADER)); iota += sizeof(CODE_FMAX_HEADER);
+
+        for (i = 0; i < 10; ++i) {
+            if (n >= i+1) {
+                memcpy(code + iota, CODE_LOAD_A_XMM3[i], CODESIZE_LOAD_A_XMM3[i]);
+                iota += CODESIZE_LOAD_A_XMM3[i];
+                memcpy(code + iota, CODE_MAX_XMM3_XMM1_XMM1, sizeof(CODE_MAX_XMM3_XMM1_XMM1));
+                iota += sizeof(CODE_MAX_XMM3_XMM1_XMM1);
+            }
+        }
+        memcpy(code + iota, CODE_ACC_FAST_EXP_HEADER, sizeof(CODE_ACC_FAST_EXP_HEADER)); iota += sizeof(CODE_ACC_FAST_EXP_HEADER);
+        for (i = 0; i < 10; ++i) {
+            if (n >= i+1) {
+                memcpy(code + iota, CODE_LOAD_A_XMM3[i], CODESIZE_LOAD_A_XMM3[i]);
+                iota += CODESIZE_LOAD_A_XMM3[i];
+                memcpy(code + iota, CODE_ACC_FAST_EXP_CYCLE, sizeof(CODE_ACC_FAST_EXP_CYCLE));
+                iota += sizeof(CODE_ACC_FAST_EXP_CYCLE);
+            }
+        }
+        memcpy(code + iota, CODE_FAST_LOG, sizeof(CODE_FAST_LOG)); iota += sizeof(CODE_FAST_LOG);
+
+    }
+    memcpy(code + iota, CODE_LOG_SUM_EXP_FOOTER, sizeof(CODE_LOG_SUM_EXP_FOOTER)); iota += sizeof(CODE_LOG_SUM_EXP_FOOTER);
+
+    return 0;
+}
+
+
+
+
 
 int main() {
     int err = 0, i;
     double data[10], expected, actual;
+
+    range_t ranges[12];
 
     data[0] = log(1.0/55.0);
     data[1] = log(2.0/55.0);
@@ -347,17 +474,30 @@ int main() {
     data[8] = log(9.0/55.0);
     data[9] = log(10.0/55.0);
 
+    ranges[0].offset = 0; ranges[0].width = 1;
+    ranges[1].offset = 0; ranges[1].width = 1;
+    ranges[2].offset = 0; ranges[2].width = 2;
+    ranges[3].offset = 0; ranges[3].width = 10;
+    ranges[4].offset = 3; ranges[4].width = 4;
+    ranges[5].offset = 3; ranges[5].width = 6;
+    ranges[6].offset = 3; ranges[6].width = 2;
+    ranges[7].offset = 5; ranges[7].width = 5;
+    ranges[8].offset = 8; ranges[8].width = 2;
+    ranges[9].offset = 9; ranges[9].width = 1;
+    ranges[10].offset = 2; ranges[10].width = 4;
+    ranges[11].offset = 4; ranges[11].width = 3;
+
     jit_reduction_func_t jf;
     jf.f = NULL;
     jf.m = NULL;
     jf.size = 0;
 
-    for(i = 0; i < 11; ++i) {
-        expected = baseline_log_sum_exp(data, i);
+    for(i = 0; i < 12; ++i) {
+        expected = baseline_batch_log_sum_exp(data, ranges, i);
 
-        err = make_log_sum_exp_jit_reduction_func(i, &jf);
+        err = make_batch_log_sum_exp_jit_reduction_func(ranges, i, &jf);
         if (err != 0) {
-            perror("err: make_log_sum_exp_jit_reduction_func");
+            perror("err: make_batch_log_sum_exp_jit_reduction_func");
             return err;
         }
         err = arm_jit_reduction_func(&jf);
@@ -369,7 +509,9 @@ int main() {
             }
             return err;
         }
-        actual = jf.f(data);
+        // x86-64 system V ABI
+        // first three integer/pointer parameters are passed as rdi, rsi, rdx
+        actual = jf.f(data, ranges, i);
 
         err = release_jit_reduction_func(&jf);
         if (err != 0) {
