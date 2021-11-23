@@ -18,7 +18,7 @@ typedef struct {
 
 
 double baseline_fmax(double *a) {
-	return fmax(-INFINITY, fmax(a[0], a[1]));
+	return fmax(a[2], fmax(a[0], a[1]));
 }
 
 
@@ -65,17 +65,144 @@ const unsigned char CODE_RETURN_A2_FMAX[] = {
 };
 
 
+const unsigned char CODE_LOAD_A0_XMM3[] = {
+   0xc5, 0xfb, 0x10, 0x1f //vmovsd (%rdi),%xmm3
+};
+
+const unsigned char CODE_LOAD_A1_XMM3[] = {
+   0xc5, 0xfb, 0x10, 0x5f, 0x08 //vmovsd 0x8(%rdi),%xmm3
+};
+
+const unsigned char CODE_LOAD_A2_XMM3[] = {
+   0xc5, 0xfb, 0x10, 0x5f, 0x10 //vmovsd 0x10(%rdi),%xmm3
+};
+
+const unsigned char CODE_LOAD_A3_XMM3[] = {
+   0xc5, 0xfb, 0x10, 0x5f, 0x18
+};
+
+const unsigned char CODE_LOAD_A4_XMM3[] = {
+   0xc5, 0xfb, 0x10, 0x5f, 0x20
+};
+
+const unsigned char CODE_LOAD_A5_XMM3[] = {
+   0xc5, 0xfb, 0x10, 0x5f, 0x28
+};
+
+const unsigned char CODE_LOAD_A6_XMM3[] = {
+   0xc5, 0xfb, 0x10, 0x5f, 0x30
+};
+
+const unsigned char CODE_LOAD_A7_XMM3[] = {
+   0xc5, 0xfb, 0x10, 0x5f, 0x38
+};
+
+const unsigned char CODE_LOAD_A8_XMM3[] = {
+   0xc5, 0xfb, 0x10, 0x5f, 0x40
+};
+
+const unsigned char CODE_LOAD_A9_XMM3[] = {
+   0xc5, 0xfb, 0x10, 0x5f, 0x48
+};
+
+
+const unsigned char* CODE_LOAD_A_XMM3[] = {
+    CODE_LOAD_A0_XMM3,
+    CODE_LOAD_A1_XMM3,
+    CODE_LOAD_A2_XMM3,
+    CODE_LOAD_A3_XMM3,
+    CODE_LOAD_A4_XMM3,
+    CODE_LOAD_A5_XMM3,
+    CODE_LOAD_A6_XMM3,
+    CODE_LOAD_A7_XMM3,
+    CODE_LOAD_A8_XMM3,
+    CODE_LOAD_A9_XMM3
+};
+
+const size_t CODESIZE_LOAD_A_XMM3[] = {
+    sizeof(CODE_LOAD_A0_XMM3),
+    sizeof(CODE_LOAD_A1_XMM3),
+    sizeof(CODE_LOAD_A2_XMM3),
+    sizeof(CODE_LOAD_A3_XMM3),
+    sizeof(CODE_LOAD_A4_XMM3),
+    sizeof(CODE_LOAD_A5_XMM3),
+    sizeof(CODE_LOAD_A6_XMM3),
+    sizeof(CODE_LOAD_A7_XMM3),
+    sizeof(CODE_LOAD_A8_XMM3),
+    sizeof(CODE_LOAD_A9_XMM3),
+};
+
+
+
+const unsigned char CODE_MAX_XMM3_XMM1_XMM1[] = {
+    0xc5, 0xf3, 0x5f, 0xcb // vmaxsd %xmm3,%xmm1,%xmm1
+};
+
+const unsigned char CODE_FMAX_HEADER[] = {
+    0xc5, 0xf9, 0x57, 0xc0, // vxorpd %xmm0,%xmm0,%xmm0
+    0x48, 0xb9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0xff, // movabs $0xfff0000000000000,%rcx // aka -inf
+    0xc4, 0xe1, 0xf9, 0x6e, 0xc9  // vmovq  %rcx,%xmm1
+};
+
+const unsigned char CODE_FMAX_FOOTER[] = {
+    0xc5, 0xf9, 0x28, 0xc1, // vmovapd %xmm1,%xmm0
+    0xc3 // retq
+};
+
+
+unsigned char* make_fmax_code(int n, size_t *size) {
+    // Generate code for computing the max of an array of n doubles,
+    // where the address of the array is in rdi
+    // Values of n from 0 to 10 are supported.
+    // return value:  pointer to generated code
+    // the size of the generated code is written to size.
+    //
+    // TODO FIXME
+    // generated code is simple, not efficient:
+    //   max( ... max(max(-inf, a[0]), a[1]), ..., a[n-1])
+    int total_size = 0, iota, i;
+    unsigned char *code = NULL;
+    total_size += sizeof(CODE_FMAX_HEADER);
+    for (i = 0; i < 10; ++i) {
+        if (n >= i+1) {
+            total_size += CODESIZE_LOAD_A_XMM3[i] + sizeof(CODE_MAX_XMM3_XMM1_XMM1);
+        }
+    }
+    total_size += sizeof(CODE_FMAX_FOOTER);
+
+    code = (unsigned char*)malloc(total_size * sizeof(unsigned char));
+    iota = 0;
+    memcpy(code + iota, CODE_FMAX_HEADER, sizeof(CODE_FMAX_HEADER)); iota += sizeof(CODE_FMAX_HEADER);
+
+    for (i = 0; i < 10; ++i) {
+        if (n >= i+1) {
+            memcpy(code + iota, CODE_LOAD_A_XMM3[i], CODESIZE_LOAD_A_XMM3[i]);
+            iota += CODESIZE_LOAD_A_XMM3[i];
+            memcpy(code + iota, CODE_MAX_XMM3_XMM1_XMM1, sizeof(CODE_MAX_XMM3_XMM1_XMM1));
+            iota += sizeof(CODE_MAX_XMM3_XMM1_XMM1);
+        }
+    }
+    memcpy(code + iota, CODE_FMAX_FOOTER, sizeof(CODE_FMAX_FOOTER)); iota += sizeof(CODE_FMAX_FOOTER);
+    *size = iota;
+    return code;
+}
+
 
 
 int main() {
     int err = 0;
-    double data[2];
+    double data[3];
+    unsigned char *code;
+    size_t code_size;
     data[0] = -4.3;
     data[1] = 88.123;
+    data[2] = 98.123;
 
     jit_reduction_func_t jf;
 
-    err = make_jit_reduction_func(CODE_RETURN_A2_FMAX, sizeof(CODE_RETURN_A2_FMAX), &jf);
+    code = make_fmax_code(1, &code_size);
+
+    err = make_jit_reduction_func(code, code_size, &jf);
     if (err != 0) {
         perror("err: make_jit_reduction_func");
         return err;
