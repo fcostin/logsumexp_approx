@@ -1,6 +1,6 @@
 
 all:	poc
-.PHONY: poc
+.PHONY: all
 
 %.o:	%.s
 	gcc -Wall -c $< -o $@
