@@ -3,6 +3,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "types.h"
+
+#include "jit_logsumexp.c"
+
 // ref: Curioni -- Fast Exponential Computation on SIMD Architectures
 // ref: Schraudolph -- A Fast, Compact Approximation of the Exponential Function
 
@@ -24,13 +28,7 @@
 #define MODE_ONLY_SUM 3
 #define MODE_FASTER 4
 #define MODE_FASTERBB 6
-
-
-typedef struct {
-    int offset;
-    int width;
-} range_t;
-
+#define MODE_JIT 7
 
 
 static inline double reinterpret_long_as_double(long int x) {
@@ -402,13 +400,19 @@ void batch_log_inplace(double *a, int n) {
 
 int main(int argc, char **argv) {
     unsigned int seed;
-    int n, m, w, i, trials, j;
+    int n, m, w, i, trials, j, err;
     double *logps;
 
     range_t *ranges;
     double acc;
 
     int mode=-1;
+
+    jit_reduction_func_t jf;
+    jf.m = NULL;
+    jf.size = 0;
+    jf.f = NULL;
+
     if (argc <= 1) {
         printf("set mode=base\n");
         mode = MODE_BASE;
@@ -428,8 +432,11 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[1], "fasterbb") == 0) {
             printf("set mode=fasterbb\n");
             mode = MODE_FASTERBB;
+        } else if (strcmp(argv[1], "jit") == 0) {
+            printf("set mode=jit\n");
+            mode = MODE_JIT;
         } else {
-            printf("unrecognised mode, expected one of 'base', 'fast', 'faster', 'fasterbb', 'onlysum'\n");
+            printf("unrecognised mode, expected one of 'base', 'fast', 'faster', 'fasterbb', 'jit', 'onlysum'\n");
             exit(1);
         }
     }
@@ -496,9 +503,32 @@ int main(int argc, char **argv) {
             acc += faster_log_sum_exp_bb(ranges, logps, n);
             logps[0] -= acc; // impede optimisation
        }
+    } else if (mode == MODE_JIT) {
+
+        err = make_batch_log_sum_exp_jit_reduction_func(ranges, n, &jf);
+        if (err != 0) {
+            perror("err: make_batch_log_sum_exp_jit_reduction_func");
+            return err;
+        }
+        err = arm_jit_reduction_func(&jf);
+        if (err != 0) {
+            perror("err: arm_jit_reduction_func");
+            err = release_jit_reduction_func(&jf);
+            if (err != 0) {
+                perror("err: release_jit_reduction_func");
+            }
+            return err;
+        }
+
+        for (j = 0; j < trials; ++j) {
+            acc += jf.f(logps, ranges, n);
+        }
+
+        err = release_jit_reduction_func(&jf);
+        if (err != 0) {
+            perror("err: release_jit_reduction_func");
+        }
     }
-
-
 
 
     printf("done\n");
