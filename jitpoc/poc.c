@@ -211,13 +211,17 @@ unsigned char* make_log_sum_exp_code(int n, size_t *size) {
     // return value:  pointer to generated code
     // the size of the generated code is written to size.
     //
+    // IMPLEMENTED
+    //
+    // - first pass to compute acc_max
+    //
+    // - the second pass to compute acc = sum(fast_exp(a[i] - acc_max))
+    //
     // TODO FIXME
     // - the first pass to compute acc_max daisy chains n max operations.
     //   it is simple but will have unnecessarily high latency.
     //
     // - there is no test for acc_max <= -inf and early return.
-    //
-    // - the second pass to compute acc = sum(fast_exp(a[i] - acc_max)) not implemented
     //
     // - the third pass to compute fast_log(acc) + acc_max is not implemented
     int total_size = 0, iota, i;
