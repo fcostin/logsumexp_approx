@@ -206,6 +206,11 @@ const unsigned char CODE_LOG_SUM_EXP_FOOTER[] = {
 };
 
 
+const unsigned char CODE_ACCUMULATE_XMM3_XMM0[] = {
+    0xc5, 0xfb, 0x58, 0xc3 // vaddsd %xmm3,%xmm0,%xmm0
+};
+
+
 int make_log_sum_exp_jit_reduction_func(int n, jit_reduction_func_t *jf) {
     // Generate code for computing the log sum exp of an array of n doubles,
     // where the address of the array is in rdi
@@ -224,22 +229,19 @@ int make_log_sum_exp_jit_reduction_func(int n, jit_reduction_func_t *jf) {
     //   it is simple but will have unnecessarily high latency.
     //
     // - there is no test for acc_max <= -inf and early return.
+    // - there is no test for n=1 and early return.
     //
     int total_size = 0, iota, i, status;
     unsigned char *code = NULL;
 
     total_size += sizeof(CODE_LOG_SUM_EXP_HEADER);
     total_size += sizeof(CODE_FMAX_HEADER);
-    for (i = 0; i < 10; ++i) {
-        if (n >= i+1) {
-            total_size += CODESIZE_LOAD_A_XMM3[i] + sizeof(CODE_MAX_XMM3_XMM1_XMM1);
-        }
+    for (i = 0; i < n; ++i) {
+        total_size += CODESIZE_LOAD_A_XMM3[i] + sizeof(CODE_MAX_XMM3_XMM1_XMM1);
     }
     total_size += sizeof(CODE_ACC_FAST_EXP_HEADER);
-    for (i = 0; i < 10; ++i) {
-        if (n >= i+1) {
-            total_size += CODESIZE_LOAD_A_XMM3[i] + sizeof(CODE_ACC_FAST_EXP_CYCLE);
-        }
+    for (i = 0; i < n; ++i) {
+        total_size += CODESIZE_LOAD_A_XMM3[i] + sizeof(CODE_ACC_FAST_EXP_CYCLE);
     }
     total_size += sizeof(CODE_FAST_LOG);
     total_size += sizeof(CODE_LOG_SUM_EXP_FOOTER);
@@ -257,22 +259,18 @@ int make_log_sum_exp_jit_reduction_func(int n, jit_reduction_func_t *jf) {
 
     memcpy(code + iota, CODE_FMAX_HEADER, sizeof(CODE_FMAX_HEADER)); iota += sizeof(CODE_FMAX_HEADER);
 
-    for (i = 0; i < 10; ++i) {
-        if (n >= i+1) {
-            memcpy(code + iota, CODE_LOAD_A_XMM3[i], CODESIZE_LOAD_A_XMM3[i]);
-            iota += CODESIZE_LOAD_A_XMM3[i];
-            memcpy(code + iota, CODE_MAX_XMM3_XMM1_XMM1, sizeof(CODE_MAX_XMM3_XMM1_XMM1));
-            iota += sizeof(CODE_MAX_XMM3_XMM1_XMM1);
-        }
+    for (i = 0; i < n; ++i) {
+        memcpy(code + iota, CODE_LOAD_A_XMM3[i], CODESIZE_LOAD_A_XMM3[i]);
+        iota += CODESIZE_LOAD_A_XMM3[i];
+        memcpy(code + iota, CODE_MAX_XMM3_XMM1_XMM1, sizeof(CODE_MAX_XMM3_XMM1_XMM1));
+        iota += sizeof(CODE_MAX_XMM3_XMM1_XMM1);
     }
     memcpy(code + iota, CODE_ACC_FAST_EXP_HEADER, sizeof(CODE_ACC_FAST_EXP_HEADER)); iota += sizeof(CODE_ACC_FAST_EXP_HEADER);
-    for (i = 0; i < 10; ++i) {
-        if (n >= i+1) {
-            memcpy(code + iota, CODE_LOAD_A_XMM3[i], CODESIZE_LOAD_A_XMM3[i]);
-            iota += CODESIZE_LOAD_A_XMM3[i];
-            memcpy(code + iota, CODE_ACC_FAST_EXP_CYCLE, sizeof(CODE_ACC_FAST_EXP_CYCLE));
-            iota += sizeof(CODE_ACC_FAST_EXP_CYCLE);
-        }
+    for (i = 0; i < n; ++i) {
+        memcpy(code + iota, CODE_LOAD_A_XMM3[i], CODESIZE_LOAD_A_XMM3[i]);
+        iota += CODESIZE_LOAD_A_XMM3[i];
+        memcpy(code + iota, CODE_ACC_FAST_EXP_CYCLE, sizeof(CODE_ACC_FAST_EXP_CYCLE));
+        iota += sizeof(CODE_ACC_FAST_EXP_CYCLE);
     }
     memcpy(code + iota, CODE_FAST_LOG, sizeof(CODE_FAST_LOG)); iota += sizeof(CODE_FAST_LOG);
     memcpy(code + iota, CODE_LOG_SUM_EXP_FOOTER, sizeof(CODE_LOG_SUM_EXP_FOOTER)); iota += sizeof(CODE_LOG_SUM_EXP_FOOTER);
@@ -319,19 +317,21 @@ int make_batch_log_sum_exp_jit_reduction_func(range_t *ranges, int n_ranges, jit
         // move rdi by delta_offset * sizeof(double)
         total_size += sizeof(code_shift_rdi);
 
-        total_size += sizeof(CODE_FMAX_HEADER);
-        for (i = 0; i < 10; ++i) {
-            if (n >= i+1) {
+        if (n == 1) {
+            // special case: log_sum_exp([x]) is x
+            total_size += CODESIZE_LOAD_A_XMM3[0];
+            total_size += sizeof(CODE_ACCUMULATE_XMM3_XMM0);
+        } else {
+            total_size += sizeof(CODE_FMAX_HEADER);
+            for (i = 0; i < n; ++i) {
                 total_size += CODESIZE_LOAD_A_XMM3[i] + sizeof(CODE_MAX_XMM3_XMM1_XMM1);
             }
-        }
-        total_size += sizeof(CODE_ACC_FAST_EXP_HEADER);
-        for (i = 0; i < 10; ++i) {
-            if (n >= i+1) {
+            total_size += sizeof(CODE_ACC_FAST_EXP_HEADER);
+            for (i = 0; i < n; ++i) {
                 total_size += CODESIZE_LOAD_A_XMM3[i] + sizeof(CODE_ACC_FAST_EXP_CYCLE);
             }
+            total_size += sizeof(CODE_FAST_LOG);
         }
-        total_size += sizeof(CODE_FAST_LOG);
     }
 
     total_size += sizeof(CODE_LOG_SUM_EXP_FOOTER);
@@ -359,27 +359,30 @@ int make_batch_log_sum_exp_jit_reduction_func(range_t *ranges, int n_ranges, jit
         encode_literal_int64(code_shift_rdi + 2, (long)(sizeof(double) * delta_offset)); // overwrite int64 literal with delta_offset
         memcpy(code + iota, code_shift_rdi, sizeof(code_shift_rdi)); iota += sizeof(code_shift_rdi);
 
-        memcpy(code + iota, CODE_FMAX_HEADER, sizeof(CODE_FMAX_HEADER)); iota += sizeof(CODE_FMAX_HEADER);
+        if (n == 1) {
+            // special case: log_sum_exp([x]) is x
+            memcpy(code + iota, CODE_LOAD_A_XMM3[0], CODESIZE_LOAD_A_XMM3[0]);
+            iota += CODESIZE_LOAD_A_XMM3[0];
+            memcpy(code + iota, CODE_ACCUMULATE_XMM3_XMM0, sizeof(CODE_ACCUMULATE_XMM3_XMM0));
+            iota += sizeof(CODE_ACCUMULATE_XMM3_XMM0);
+        } else {
+            memcpy(code + iota, CODE_FMAX_HEADER, sizeof(CODE_FMAX_HEADER)); iota += sizeof(CODE_FMAX_HEADER);
 
-        for (i = 0; i < 10; ++i) {
-            if (n >= i+1) {
+            for (i = 0; i < n; ++i) {
                 memcpy(code + iota, CODE_LOAD_A_XMM3[i], CODESIZE_LOAD_A_XMM3[i]);
                 iota += CODESIZE_LOAD_A_XMM3[i];
                 memcpy(code + iota, CODE_MAX_XMM3_XMM1_XMM1, sizeof(CODE_MAX_XMM3_XMM1_XMM1));
                 iota += sizeof(CODE_MAX_XMM3_XMM1_XMM1);
             }
-        }
-        memcpy(code + iota, CODE_ACC_FAST_EXP_HEADER, sizeof(CODE_ACC_FAST_EXP_HEADER)); iota += sizeof(CODE_ACC_FAST_EXP_HEADER);
-        for (i = 0; i < 10; ++i) {
-            if (n >= i+1) {
+            memcpy(code + iota, CODE_ACC_FAST_EXP_HEADER, sizeof(CODE_ACC_FAST_EXP_HEADER)); iota += sizeof(CODE_ACC_FAST_EXP_HEADER);
+            for (i = 0; i < n; ++i) {
                 memcpy(code + iota, CODE_LOAD_A_XMM3[i], CODESIZE_LOAD_A_XMM3[i]);
                 iota += CODESIZE_LOAD_A_XMM3[i];
                 memcpy(code + iota, CODE_ACC_FAST_EXP_CYCLE, sizeof(CODE_ACC_FAST_EXP_CYCLE));
                 iota += sizeof(CODE_ACC_FAST_EXP_CYCLE);
             }
+            memcpy(code + iota, CODE_FAST_LOG, sizeof(CODE_FAST_LOG)); iota += sizeof(CODE_FAST_LOG);
         }
-        memcpy(code + iota, CODE_FAST_LOG, sizeof(CODE_FAST_LOG)); iota += sizeof(CODE_FAST_LOG);
-
     }
     memcpy(code + iota, CODE_LOG_SUM_EXP_FOOTER, sizeof(CODE_LOG_SUM_EXP_FOOTER)); iota += sizeof(CODE_LOG_SUM_EXP_FOOTER);
 
