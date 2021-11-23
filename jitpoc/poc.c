@@ -32,21 +32,46 @@ double baseline_log_sum_exp(double *a, int n) {
 }
 
 
-int make_jit_reduction_func(const unsigned char *code, size_t size, jit_reduction_func_t *out) {
-    int status = 0;
+int allocate_jit_reduction_func(size_t size, jit_reduction_func_t *jf) {
     size_t alloc_size = ((size / 1024) + 1) * 1024;
 	void* m = mmap(0, alloc_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); // RW
     if (m == 0) {
+        jf->f = NULL;
+        jf->m = NULL;
+        jf->size = 0;
         return 1;
     }
-	memcpy(m, code, size);
-	status = mprotect(m,alloc_size, PROT_READ | PROT_EXEC); // RX
+    jf->f = NULL;
+    jf->m = m;
+    jf->size = alloc_size;
+    return 0;
+}
+
+int arm_jit_reduction_func(jit_reduction_func_t *jf) {
+    int status;
+    if (jf->m == NULL) {
+        return 1;
+    }
+	status = mprotect(jf->m, jf->size, PROT_READ | PROT_EXEC); // RX
     if (status != 0) {
         return status;
     }
-    out->f = m;
-    out->m = m;
-    out->size = alloc_size;
+    jf->f = (reduction_func_t)jf->m;
+    return status;
+}
+
+int release_jit_reduction_func(jit_reduction_func_t *jf) {
+    int status;
+    jf->f = NULL;
+    if (jf->m == NULL) {
+        jf->size = 0;
+        return 0;
+    }
+    status = munmap(jf->m, jf->size);
+    if (status != 0) {
+        return status;
+    }
+    jf->size = 0;
     return 0;
 }
 
@@ -232,12 +257,10 @@ const unsigned char CODE_LOG_SUM_EXP_FOOTER[] = {
 };
 
 
-unsigned char* make_log_sum_exp_code(int n, size_t *size) {
+int make_log_sum_exp_jit_reduction_func(int n, jit_reduction_func_t *jf) {
     // Generate code for computing the log sum exp of an array of n doubles,
     // where the address of the array is in rdi
     // Values of n from 0 to 10 are supported.
-    // return value:  pointer to generated code
-    // the size of the generated code is written to size.
     //
     // IMPLEMENTED
     //
@@ -253,7 +276,7 @@ unsigned char* make_log_sum_exp_code(int n, size_t *size) {
     //
     // - there is no test for acc_max <= -inf and early return.
     //
-    int total_size = 0, iota, i;
+    int total_size = 0, iota, i, status;
     unsigned char *code = NULL;
     total_size += sizeof(CODE_LOG_SUM_EXP_HEADER);
     total_size += sizeof(CODE_FMAX_HEADER);
@@ -271,7 +294,13 @@ unsigned char* make_log_sum_exp_code(int n, size_t *size) {
     total_size += sizeof(CODE_FAST_LOG);
     total_size += sizeof(CODE_LOG_SUM_EXP_FOOTER);
 
-    code = (unsigned char*)malloc(total_size * sizeof(unsigned char));
+    status = allocate_jit_reduction_func(total_size * sizeof(unsigned char), jf);
+    if (status != 0) {
+        return status;
+    }
+    code = (unsigned char*)jf->m;
+
+
     iota = 0;
 
     memcpy(code + iota, CODE_LOG_SUM_EXP_HEADER, sizeof(CODE_LOG_SUM_EXP_HEADER)); iota += sizeof(CODE_LOG_SUM_EXP_HEADER);
@@ -297,8 +326,8 @@ unsigned char* make_log_sum_exp_code(int n, size_t *size) {
     }
     memcpy(code + iota, CODE_FAST_LOG, sizeof(CODE_FAST_LOG)); iota += sizeof(CODE_FAST_LOG);
     memcpy(code + iota, CODE_LOG_SUM_EXP_FOOTER, sizeof(CODE_LOG_SUM_EXP_FOOTER)); iota += sizeof(CODE_LOG_SUM_EXP_FOOTER);
-    *size = iota;
-    return code;
+
+    return 0;
 }
 
 
@@ -306,8 +335,7 @@ unsigned char* make_log_sum_exp_code(int n, size_t *size) {
 int main() {
     int err = 0, i;
     double data[10], expected, actual;
-    unsigned char *code;
-    size_t code_size;
+
     data[0] = log(1.0/55.0);
     data[1] = log(2.0/55.0);
     data[2] = log(3.0/55.0);
@@ -320,21 +348,32 @@ int main() {
     data[9] = log(10.0/55.0);
 
     jit_reduction_func_t jf;
+    jf.f = NULL;
+    jf.m = NULL;
+    jf.size = 0;
 
     for(i = 0; i < 11; ++i) {
         expected = baseline_log_sum_exp(data, i);
 
-        code = make_log_sum_exp_code(i, &code_size);
-        err = make_jit_reduction_func(code, code_size, &jf);
-        free(code);
+        err = make_log_sum_exp_jit_reduction_func(i, &jf);
         if (err != 0) {
-            perror("err: make_jit_reduction_func");
+            perror("err: make_log_sum_exp_jit_reduction_func");
+            return err;
+        }
+        err = arm_jit_reduction_func(&jf);
+        if (err != 0) {
+            perror("err: arm_jit_reduction_func");
+            err = release_jit_reduction_func(&jf);
+            if (err != 0) {
+                perror("err: release_jit_reduction_func");
+            }
             return err;
         }
         actual = jf.f(data);
-        err = munmap(jf.m, jf.size);
+
+        err = release_jit_reduction_func(&jf);
         if (err != 0) {
-            perror("err: munmap");
+            perror("err: release_jit_reduction_func");
             return err;
         }
         jf.f = NULL;
@@ -343,8 +382,6 @@ int main() {
         printf("baseline result = %g\n", expected);
         printf("jit      result = %g\n", actual);
     }
-
-
 
 	return 0;
 }
