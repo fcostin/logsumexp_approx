@@ -17,8 +17,13 @@ typedef struct {
 } jit_reduction_func_t;
 
 
-double baseline_fmax(double *a) {
-	return fmax(a[2], fmax(a[0], a[1]));
+double baseline_fmax(double *a, int n) {
+    int i;
+    double acc_max = -INFINITY;
+    for (i=0; i < n; ++i) {
+        acc_max = fmax(a[i], acc_max);
+    }
+    return acc_max;
 }
 
 
@@ -190,26 +195,47 @@ unsigned char* make_fmax_code(int n, size_t *size) {
 
 
 int main() {
-    int err = 0;
-    double data[3];
+    int err = 0, i;
+    double data[10], expected, actual;
     unsigned char *code;
     size_t code_size;
-    data[0] = -4.3;
-    data[1] = 88.123;
-    data[2] = 98.123;
+    data[0] = -1.2;
+    data[1] = 3.4;
+    data[2] = 5.6;
+    data[3] = 7.8;
+    data[4] = 9.1;
+    data[5] = 11.12;
+    data[6] = 13.14;
+    data[7] = 14.15;
+    data[8] = 16.17;
+    data[9] = 18.19;
 
     jit_reduction_func_t jf;
 
-    code = make_fmax_code(1, &code_size);
+    for(i = 0; i < 11; ++i) {
+        expected = baseline_fmax(data, i);
 
-    err = make_jit_reduction_func(code, code_size, &jf);
-    if (err != 0) {
-        perror("err: make_jit_reduction_func");
-        return err;
+        code = make_fmax_code(i, &code_size);
+        err = make_jit_reduction_func(code, code_size, &jf);
+        free(code);
+        if (err != 0) {
+            perror("err: make_jit_reduction_func");
+            return err;
+        }
+        actual = jf.f(data);
+        err = munmap(jf.m, jf.size);
+        if (err != 0) {
+            perror("err: munmap");
+            return err;
+        }
+        jf.f = NULL;
+        jf.size = 0;
+
+        printf("baseline result = %g\n", expected);
+        printf("jit      result = %g\n", actual);
     }
 
-	printf("baseline result = %g\n", baseline_fmax(data));
-	printf("jit      result = %g\n", jf.f(data));
+
 
 	return 0;
 }
