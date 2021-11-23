@@ -44,4 +44,15 @@ compile-blocks  gen     	0.350   	code generate a single function taking
 						blocks are duplicated in input, clang
 						finds all of these and factors them out.
 						Compilation takes about 5 minutes.
+
+jit_poc		jit		0.425 -- 0.468	code generate a single branchless function
+						taking all block offsets and widths as
+						known at runtime. Compile and execute at
+						runtime using a crude JIT compiler.
+						Cause of timing variability unknown, but
+						perf stat -dd suggests that the size of the
+						generated code may be placing a strain on
+						the instruction cache. For larger inputs
+						that trigger correspondingly larger
+						generated code, performance can plummet.
 ```
