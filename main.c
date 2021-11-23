@@ -534,9 +534,11 @@ int main(int argc, char **argv) {
         }
     }
 
-
     printf("done\n");
-
     printf("acc = %g\n", acc);
+
+    free(ranges);
+    free(logps);
+
     return 0;
 }
