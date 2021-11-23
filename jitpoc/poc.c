@@ -28,7 +28,7 @@ double baseline_log_sum_exp(double *a, int n) {
     for (i=0; i < n; ++i) {
         acc += exp(a[i] - acc_max);
     }
-    return acc;
+    return log(acc) + acc_max;
 }
 
 
@@ -201,6 +201,31 @@ const unsigned char CODE_ACC_FAST_EXP_CYCLE[] = {
 };
 
 
+const unsigned char CODE_FAST_LOG[] = {
+	// prepare constants for fast log
+	0xc5, 0xc1, 0x57, 0xff, // vxorpd %xmm7,%xmm7,%xmm7 // xmm7 = 0.0  . used in a couple of spots
+	0x48, 0xb9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0xff, // movabs $0xfff0000000000000,%rcx
+	0xc4, 0xe1, 0xf9, 0x6e, 0xe1, // vmovq  %rcx,%xmm4  # xmm4 = constant -inf
+	0x48, 0xb9, 0xef, 0x39, 0xfa, 0xfe, 0x42, 0x2e, 0xa6, 0x3c, // movabs $0x3ca62e42fefa39ef,%rcx
+	0xc4, 0xe1, 0xf9, 0x6e, 0xe9, // vmovq  %rcx,%xmm5  # xmm5 = constant inv_approx_factor
+	0x48, 0xb9, 0x20, 0x24, 0x35, 0x1e, 0x65, 0x28, 0x86, 0xc0, // movabs $0xc08628651e352420,%rcx
+	0xc4, 0xe1, 0xf9, 0x6e, 0xf1, // vmovq  %rcx,%xmm6  # xmm6 = constant inv_approx_term
+
+	// compute fast log
+	0xc4, 0xe1, 0xf9, 0x7e, 0xd0, // vmovq  %xmm2,%rax  # fast log approx
+	// note: xmm7 copied into high 64 bits of xmm3, which are then ignored.
+	0xc4, 0xe1, 0xc3, 0x2a, 0xd8, // vcvtsi2sd %rax,%xmm7,%xmm3  # fast log approx
+	0xc4, 0xe2, 0xd1, 0xa9, 0xde, // vfmadd213sd %xmm6,%xmm5,%xmm3  # fast log approx
+	0xc5, 0xc3, 0xc2, 0xd2, 0x01, // vcmpltsd %xmm2,%xmm7,%xmm2  # guard against nonpositive arg
+	0xc4, 0xe3, 0x59, 0x4b, 0xd3, 0x20, // vblendvpd %xmm2,%xmm3,%xmm4,%xmm2  # guard against nonpositive arg
+
+	// accumulate
+	0xc5, 0xf3, 0x58, 0xd2, // vaddsd %xmm2,%xmm1,%xmm2  # acc = fast_log(acc) + acc_max
+	0xc5, 0xfb, 0x58, 0xc2 // vaddsd %xmm2,%xmm0,%xmm0  # result += acc
+};
+
+
+
 const unsigned char CODE_LOG_SUM_EXP_FOOTER[] = {
     0xc5, 0xf9, 0x28, 0xc2, // vmovapd %xmm2,%xmm0  # result += acc
     0xc3 // retq
@@ -220,13 +245,14 @@ unsigned char* make_log_sum_exp_code(int n, size_t *size) {
     //
     // - the second pass to compute acc = sum(fast_exp(a[i] - acc_max))
     //
+    // - the third pass to compute fast_log(acc) + acc_max
+    //
     // TODO FIXME
     // - the first pass to compute acc_max daisy chains n max operations.
     //   it is simple but will have unnecessarily high latency.
     //
     // - there is no test for acc_max <= -inf and early return.
     //
-    // - the third pass to compute fast_log(acc) + acc_max is not implemented
     int total_size = 0, iota, i;
     unsigned char *code = NULL;
     total_size += sizeof(CODE_LOG_SUM_EXP_HEADER);
@@ -242,6 +268,7 @@ unsigned char* make_log_sum_exp_code(int n, size_t *size) {
             total_size += CODESIZE_LOAD_A_XMM3[i] + sizeof(CODE_ACC_FAST_EXP_CYCLE);
         }
     }
+    total_size += sizeof(CODE_FAST_LOG);
     total_size += sizeof(CODE_LOG_SUM_EXP_FOOTER);
 
     code = (unsigned char*)malloc(total_size * sizeof(unsigned char));
@@ -268,6 +295,7 @@ unsigned char* make_log_sum_exp_code(int n, size_t *size) {
             iota += sizeof(CODE_ACC_FAST_EXP_CYCLE);
         }
     }
+    memcpy(code + iota, CODE_FAST_LOG, sizeof(CODE_FAST_LOG)); iota += sizeof(CODE_FAST_LOG);
     memcpy(code + iota, CODE_LOG_SUM_EXP_FOOTER, sizeof(CODE_LOG_SUM_EXP_FOOTER)); iota += sizeof(CODE_LOG_SUM_EXP_FOOTER);
     *size = iota;
     return code;
