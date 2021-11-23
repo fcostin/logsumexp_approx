@@ -504,6 +504,7 @@ int main(int argc, char **argv) {
             logps[0] -= acc; // impede optimisation
        }
     } else if (mode == MODE_JIT) {
+        printf("jit: input pattern has %d ranges with total size %zu bytes\n", n, n * sizeof(range_t));
         printf("jit: generating code\n");
         err = make_batch_log_sum_exp_jit_reduction_func(ranges, n, &jf);
         if (err != 0) {
