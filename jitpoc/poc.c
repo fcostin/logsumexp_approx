@@ -155,8 +155,11 @@ const unsigned char CODE_MAX_XMM3_XMM1_XMM1[] = {
  xmm2 -- per reduction, accumulates acc
 */
 
+const unsigned char CODE_LOG_SUM_EXP_HEADER[] = {
+    0xc5, 0xf9, 0x57, 0xc0 // vxorpd %xmm0,%xmm0,%xmm0
+};
+
 const unsigned char CODE_FMAX_HEADER[] = {
-    0xc5, 0xf9, 0x57, 0xc0, // vxorpd %xmm0,%xmm0,%xmm0
     0x48, 0xb9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0xff, // movabs $0xfff0000000000000,%rcx // aka -inf
     0xc4, 0xe1, 0xf9, 0x6e, 0xc9  // vmovq  %rcx,%xmm1
 };
@@ -226,6 +229,7 @@ unsigned char* make_log_sum_exp_code(int n, size_t *size) {
     // - the third pass to compute fast_log(acc) + acc_max is not implemented
     int total_size = 0, iota, i;
     unsigned char *code = NULL;
+    total_size += sizeof(CODE_LOG_SUM_EXP_HEADER);
     total_size += sizeof(CODE_FMAX_HEADER);
     for (i = 0; i < 10; ++i) {
         if (n >= i+1) {
@@ -242,6 +246,9 @@ unsigned char* make_log_sum_exp_code(int n, size_t *size) {
 
     code = (unsigned char*)malloc(total_size * sizeof(unsigned char));
     iota = 0;
+
+    memcpy(code + iota, CODE_LOG_SUM_EXP_HEADER, sizeof(CODE_LOG_SUM_EXP_HEADER)); iota += sizeof(CODE_LOG_SUM_EXP_HEADER);
+
     memcpy(code + iota, CODE_FMAX_HEADER, sizeof(CODE_FMAX_HEADER)); iota += sizeof(CODE_FMAX_HEADER);
 
     for (i = 0; i < 10; ++i) {
